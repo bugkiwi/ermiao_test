@@ -83,6 +83,7 @@ class Entry(object):
         weightB=set() 
         for i in range(size):
             eid,value=random.choice(_entry_kvs)
+            _entry_kvs.remove((eid,value))
             weight,t=value[:1],value[1:]
             _weightB.add([eid,weight,t])
 
