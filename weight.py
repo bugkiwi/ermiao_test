@@ -2,7 +2,7 @@
 #coding:utf-8
 from time import time
 from operator import itemgetter
-from random import random
+import random
 from datetime import datetime
 
 from _redis import redis,redisWeightB
@@ -11,6 +11,7 @@ from utils import cache
 
 class Entry(object):
     _WEIGHT_A_KEY="WEIGHT_A"
+    _WEIGHT_B_KEY="WEIGHT_B"
     _ENTRY_KEY="Entry:%s"
     _LOGIN_ENTRY_KEY="LOGIN_ENTRY:%s"
 
@@ -20,10 +21,12 @@ class Entry(object):
         cls.touch(id)
 
     @classmethod
-    def _adl_weight48(cls,id,weight):
+    def _add_weight48(cls,id,weight):
         if redisWeightB.exists(cls._LOGIN_ENTRY_KEY%id):
-            redisWeightB.increment(cls._LOGIN_ENTRY_KEY%id,weight)
-            redisWeightB.setex(cls._LOGIN_ENTRY_KEY%(str(id)+"-Time"),time())
+            _old_weight=int(redisWeightB.zscore(cls._WEIGHT_B_KEY,id)[:1])
+            _new_value=(_old_weight+weight)*10**11+time()
+            redisWeightB.zincrby(cls._WEIGHT_B_KEY,_new_value,id)
+            redisWeightB.set(cls._LOGIN_ENTRY_KEY%id,time())
 
     @classmethod
     def exists24(cls,id):
@@ -62,6 +65,8 @@ class Entry(object):
     def _time_line_a(cls):
         #withscores=True
         _entry_kvs=dict(redis.zrangebyscore(cls._WEIGHT_A_KEY,0,"+inf",start=0,num=100,withscores=True))
+        if len(_entry_kvs)<1:
+            return []
         _entry_ks=map(lambda eid:cls._ENTRY_KEY%eid,_entry_kvs.keys())
         _entry_time=redis.mget(_entry_ks)
         weightA=[]
@@ -70,21 +75,24 @@ class Entry(object):
         return weightA
     
     @classmethod
-    def _time_line_b(cls):
-        _entry_keys=redisWeightB.keys(cls._LOGIN_ENTRY_KEY%"*")
-        if len(_entry_keys)<1:
+    def _time_line_b(cls,size=15):
+        min_score=2*10**11+time()-3600*24
+        _entry_kvs=redisWeightB.zrangebyscore(cls._WEIGHT_B_KEY,min_score,"+inf",withscores=True)
+        if len(_entry_kvs)<1:
             return []
-        _entry_values=redisWeightB.mget(_entry_keys) 
-        print _entry_values
-        _entry_time=redisWeightB.mget(map(lambda k:k+"-Time",_entry_keys))
-        print _entry_time
+        weightB=set() 
+        for i in range(size):
+            eid,value=random.choice(_entry_kvs)
+            weight,t=value[:1],value[1:]
+            _weightB.add([eid,weight,t])
+
+        return list(weightB)
 
     @classmethod
     @cache(300)
     def time_line(cls):
         weightA=cls._time_line_a()
         weightB=cls._time_line_b()
-        #return sorted(weight_dict,key=itemgetter(1))
         weight=weightA+weightB
         return sorted(weight,key=itemgetter(2))
 
@@ -94,6 +102,7 @@ class User:
         entries=UserEntry.entries_by_uid_createtime(uid,time()-86400)#  
         for e in entries:
             redisWeightB.setex(Entry._LOGIN_ENTRY_KEY%id,17200,0)
+            redisWeightB.zadd(Entry._WEIGHT_B_KEY,time(),id)
 
 def main():
     pass
